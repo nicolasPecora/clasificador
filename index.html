@@ -8,7 +8,7 @@
         body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
         .contenedor { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
         #vista-previa { max-width: 200px; margin-top: 15px; display: none; border-radius: 4px; }
-        #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; }
+        #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; white-space: pre-line; }
         button { background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
         button:disabled { background-color: #ccc; }
     </style>
@@ -30,19 +30,18 @@
 
     async function iniciarModelo() {
         try {
-            // REGISTRO ESTRICTO: Definimos la clase InputLayer de Keras v3 para que TFJS la entienda
+            // REGISTRO ESTRICTO: Enseña a TFJS a interpretar la InputLayer de Keras v3
             tf.serialization.registerClass(
                 class PatchedInputLayer extends tf.layers.Layer {
                     static get className() { return 'InputLayer'; }
                     constructor(config) {
                         super(config || {});
-                        // Mapeamos los dos mundos: Keras 3 (batch_shape) -> TFJS Web (batchInputShape)
                         this.batchInputShape = config.batch_shape || config.batchInputShape || [null, 32, 32, 3];
                     }
                 }
             );
 
-            // Cargamos el JSON original directamente sin transformadores intermedios
+            // Carga directa del archivo JSON original de tu repositorio
             modeloJS = await tf.loadLayersModel('./model.json');
             
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
@@ -66,20 +65,31 @@
             imgElement.onload = async function() {
                 document.getElementById('resultado').innerText = "Analizando...";
 
-                let tensor = tf.browser.fromPixels(imgElement)
-                    .resizeNearestNeighbor([32, 32])
-                    .toFloat()
-                    .div(tf.scalar(255.0));
+                // Encapsulamos en tf.tidy para limpiar automáticamente tensores temporales
+                tf.tidy(() => {
+                    // 1. Forzamos 3 canales (RGB) eliminando el canal Alfa (transparencia)
+                    let tensor = tf.browser.fromPixels(imgElement, 3) 
+                        // 2. Redimensionado bilineal para suavizar bordes y evitar distorsión
+                        .resizeBilinear([32, 32]) 
+                        .toFloat()
+                        // 3. Normalización idéntica a Python (escalado 0-1)
+                        .div(tf.scalar(255.0));
 
-                let input = tensor.expandDims(0);
-                let logits = modeloJS.predict(input);
-                let probabilidades = tf.softmax(logits).dataSync();
+                    // 4. Agregamos dimensión de lote -> [1, 32, 32, 3]
+                    let input = tensor.expandDims(0);
+                    
+                    // 5. Predicción y cálculo de probabilidades reales con Softmax
+                    let logits = modeloJS.predict(input);
+                    let probabilidades = tf.softmax(logits).dataSync();
 
-                let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
-                let certeza = (probabilidades[indicePredicho] * 100).toFixed(2);
+                    // 6. Buscamos el índice con mayor confianza
+                    let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
+                    let certeza = (probabilidades[indicePredicho] * 100).toFixed(2);
 
-                document.getElementById('resultado').innerText = 
-                    `Predicción: ${nombresClases[indicePredicho].toUpperCase()}\nConfianza: ${certeza}%`;
+                    // 7. Mostramos el resultado en pantalla
+                    document.getElementById('resultado').innerText = 
+                        `Predicción: ${nombresClases[indicePredicho].toUpperCase()}\nConfianza: ${certeza}%`;
+                });
             }
         }
         lector.readAsDataURL(archivo);
