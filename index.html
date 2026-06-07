@@ -26,14 +26,25 @@
 
 <script>
     let modeloJS;
-    // Lista idéntica de etiquetas de tu notebook
     const nombresClases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
-    // Función para inicializar y cargar el modelo en el navegador
     async function iniciarModelo() {
         try {
-            // Carga el json del modelo (asume que está en la misma carpeta)
-            modeloJS = await tf.loadLayersModel('model.json');
+            // El truco para corregir el bug de compatibilidad de la InputLayer entre Python y JS:
+            // Forzamos a TensorFlow.js a registrar la estructura que exige la consola
+            tf.serialization.registerClass(
+                class patchedInputLayer extends tf.layers.Layer {
+                    static get className() { return 'InputLayer'; }
+                    constructor(config) {
+                        super(config);
+                        this.batchInputShape = config.batchInputShape || [null, 32, 32, 3];
+                    }
+                }
+            );
+
+            // Cargamos el json usando rutas relativas explícitas del servidor de GitHub
+            modeloJS = await tf.loadLayersModel('./model.json');
+            
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
             document.getElementById('cargador-foto').disabled = false;
         } catch (error) {
@@ -42,7 +53,6 @@
         }
     }
 
-    // Procesamiento de la imagen cargada por el usuario
     document.getElementById('cargador-foto').addEventListener('change', function(e) {
         const archivo = e.target.files[0];
         if (!archivo) return;
@@ -56,27 +66,19 @@
             imgElement.onload = async function() {
                 document.getElementById('resultado').innerText = "Analizando...";
 
-                // EQUIVALENTE AL PROCESAMIENTO EN PYTHON:
-                // 1. Captura la imagen del HTML y la convierte en un tensor numérico
+                // Procesamiento idéntico al flujo en Python
                 let tensor = tf.browser.fromPixels(imgElement)
-                    .resizeNearestNeighbor([32, 32]) // Redimensión estricta a 32x32
+                    .resizeNearestNeighbor([32, 32]) // Tamaño de CIFAR-10
                     .toFloat()
-                    .div(tf.scalar(255.0)); // Normalización (0.0 a 1.0)
+                    .div(tf.scalar(255.0)); // Normalización
 
-                // 2. Expande dimensiones para simular el Batch (1, 32, 32, 3)
-                let input = tensor.expandDims(0);
-
-                // 3. Ejecuta la predicción (Logits)
+                let input = tensor.expandDims(0); // Simula el Batch
                 let logits = modeloJS.predict(input);
-
-                // 4. Aplica Softmax para obtener probabilidades reales
                 let probabilidades = tf.softmax(logits).dataSync();
 
-                // 5. Encuentra el índice con mayor valor
                 let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
                 let certeza = (probabilidades[indicePredicho] * 100).toFixed(2);
 
-                // 6. Muestra el veredicto en pantalla
                 document.getElementById('resultado').innerText = 
                     `Predicción: ${nombresClases[indicePredicho].toUpperCase()}\nConfianza: ${certeza}%`;
             }
@@ -84,7 +86,6 @@
         lector.readAsDataURL(archivo);
     });
 
-    // Arranca el flujo al abrir la web
     iniciarModelo();
 </script>
 
