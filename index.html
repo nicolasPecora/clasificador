@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Clasificador CIFAR-10 Completo</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
         .contenedor { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
@@ -30,13 +30,37 @@
 
     async function iniciarModelo() {
         try {
-            // Carga directa del archivo JSON limpio y corregido
-            modeloJS = await tf.loadLayersModel('./model.json');
+            // TRADUCTOR DE ENTRADA: Soluciona el bug de Keras 3 modificando la carga en memoria
+            const handler = tf.io.browserHTTPRequest('./model.json', {
+                onProgress: (fraction) => console.log(`Cargando: ${Math.round(fraction * 100)}%`),
+                // Interceptamos la respuesta del servidor para corregir la InputLayer automáticamente
+                responseTransform: async (response) => {
+                    if (response.url.endsWith('model.json')) {
+                        let json = await response.json();
+                        // Si el JSON viene con la InputLayer de Keras 3, la parchamos de forma segura en memoria
+                        if (json.modelTopology && json.modelTopology.model_config) {
+                            let config = json.modelTopology.model_config.config;
+                            if (config && config.layers && config.layers[0].class_name === 'InputLayer') {
+                                let inputLayer = config.layers[0];
+                                // Traducimos batch_shape al formato heredado que exige la web
+                                if (inputLayer.config && inputLayer.config.batch_shape) {
+                                    inputLayer.config.batchInputShape = inputLayer.config.batch_shape;
+                                }
+                            }
+                        }
+                        return new Response(JSON.stringify(json), response);
+                    }
+                    return response;
+                }
+            });
+
+            // Cargamos usando nuestro traductor inteligente
+            modeloJS = await tf.loadLayersModel(handler);
             
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
             document.getElementById('cargador-foto').disabled = false;
         } catch (error) {
-            document.getElementById('estado').innerText = "Error crítico al cargar los archivos del modelo.";
+            document.getElementById('estado').innerText = "Error al inicializar la red neuronal.";
             console.error("Detalle del error:", error);
         }
     }
