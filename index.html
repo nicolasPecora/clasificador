@@ -30,37 +30,25 @@
 
     async function iniciarModelo() {
         try {
-            // TRADUCTOR DE ENTRADA: Soluciona el bug de Keras 3 modificando la carga en memoria
-            const handler = tf.io.browserHTTPRequest('./model.json', {
-                onProgress: (fraction) => console.log(`Cargando: ${Math.round(fraction * 100)}%`),
-                // Interceptamos la respuesta del servidor para corregir la InputLayer automáticamente
-                responseTransform: async (response) => {
-                    if (response.url.endsWith('model.json')) {
-                        let json = await response.json();
-                        // Si el JSON viene con la InputLayer de Keras 3, la parchamos de forma segura en memoria
-                        if (json.modelTopology && json.modelTopology.model_config) {
-                            let config = json.modelTopology.model_config.config;
-                            if (config && config.layers && config.layers[0].class_name === 'InputLayer') {
-                                let inputLayer = config.layers[0];
-                                // Traducimos batch_shape al formato heredado que exige la web
-                                if (inputLayer.config && inputLayer.config.batch_shape) {
-                                    inputLayer.config.batchInputShape = inputLayer.config.batch_shape;
-                                }
-                            }
-                        }
-                        return new Response(JSON.stringify(json), response);
+            // REGISTRO ESTRICTO: Definimos la clase InputLayer de Keras v3 para que TFJS la entienda
+            tf.serialization.registerClass(
+                class PatchedInputLayer extends tf.layers.Layer {
+                    static get className() { return 'InputLayer'; }
+                    constructor(config) {
+                        super(config || {});
+                        // Mapeamos los dos mundos: Keras 3 (batch_shape) -> TFJS Web (batchInputShape)
+                        this.batchInputShape = config.batch_shape || config.batchInputShape || [null, 32, 32, 3];
                     }
-                    return response;
                 }
-            });
+            );
 
-            // Cargamos usando nuestro traductor inteligente
-            modeloJS = await tf.loadLayersModel(handler);
+            // Cargamos el JSON original directamente sin transformadores intermedios
+            modeloJS = await tf.loadLayersModel('./model.json');
             
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
             document.getElementById('cargador-foto').disabled = false;
         } catch (error) {
-            document.getElementById('estado').innerText = "Error al inicializar la red neuronal.";
+            document.getElementById('estado').innerText = "Error crítico al inicializar la red neuronal.";
             console.error("Detalle del error:", error);
         }
     }
