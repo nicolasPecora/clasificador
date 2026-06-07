@@ -7,7 +7,7 @@
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin-top: 30px; background-color: #f4f4f9; }
         .contenedor { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        .badge-version { display: inline-block; padding: 4px 10px; background-color: #334155; color: #f8fafc; font-size: 0.8rem; font-weight: bold; border-radius: 12px; margin-bottom: 15px; }
+        .badge-version { display: inline-block; padding: 4px 10px; background-color: #b91c1c; color: #f8fafc; font-size: 0.8rem; font-weight: bold; border-radius: 12px; margin-bottom: 15px; }
         #vista-previa { max-width: 300px; max-height: 300px; margin-top: 15px; display: none; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; white-space: pre-line; }
         input[type="file"] { margin: 20px 0; }
@@ -16,7 +16,7 @@
 <body>
 
 <div class="contenedor">
-    <div class="badge-version">VERSIÓN: 1.0.0-AUDIT (Alineación Colab)</div>
+    <div class="badge-version">VERSIÓN: 1.0.1-RAW (Decodificador Binario Puro)</div>
     
     <h2>Clasificador de Imágenes (CIFAR-10)</h2>
     <p id="estado">Cargando modelo de Inteligencia Artificial...</p>
@@ -43,12 +43,10 @@
                 }
             );
 
-            // Carga del modelo web nativo
             modeloJS = await tf.loadLayersModel('./model.json');
-            
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
             document.getElementById('cargador-foto').disabled = false;
-            console.log("=== SISTEMA OPERATIVO WEB INICIALIZADO EN VERSIÓN 1.0.0 ===");
+            console.log("=== SISTEMA OPERATIVO WEB INICIALIZADO EN VERSIÓN 1.0.1 ===");
         } catch (error) {
             document.getElementById('estado').innerText = "Error crítico al inicializar la red neuronal.";
             console.error("Detalle del error:", error);
@@ -59,56 +57,59 @@
         const archivo = e.target.files[0];
         if (!archivo) return;
 
-        const lector = new FileReader();
-        lector.onload = function(event) {
+        // Lector 1: Solo para mostrar la miniatura visual en la pantalla
+        const lectorVista = new FileReader();
+        lectorVista.onload = function(event) {
             const imgElement = document.getElementById('vista-previa');
             imgElement.src = event.target.result;
             imgElement.style.display = "inline-block";
-
-            imgElement.onload = async function() {
-                document.getElementById('resultado').innerText = "Analizando...";
-
-                tf.tidy(() => {
-                    // 1. Extraemos los píxeles directos del elemento HTML
-                    let tensorOriginal = tf.browser.fromPixels(imgElement, 3);
-
-                    // 2. Redimensión exacta por Vecino Más Cercano (evita suavizados del navegador)
-                    let tensorRedimensionado = tf.image.resizeNearestNeighbor(tensorOriginal, [32, 32], true);
-
-                    // 3. Normalización idéntica a Python (0.0 a 1.0)
-                    let tensorNormalizado = tensorRedimensionado.toFloat().div(tf.scalar(255.0));
-
-                    // ========================================================
-                    // TELEMETRÍA DE AUDITORÍA: Imprime los primeros píxeles en consola (F12)
-                    // ========================================================
-                    const pixelesMuestra = tensorNormalizado.slice([0, 0, 0], [1, 5, 3]).dataSync();
-                    console.log("AUDITORÍA V1.0.0 - Primeros 5 píxeles (R,G,B) normalizados:", pixelesMuestra);
-
-                    // 4. Estructuración del lote (Batch) -> [1, 32, 32, 3]
-                    let imgInput = tensorNormalizado.expandDims(0);
-                    
-                    // 5. Inferencia matemática pura
-                    let logitsSalida = modeloJS.predict(imgInput);
-                    
-                    // 6. Mapeo probabilístico vía Softmax
-                    let probabilidades = tf.softmax(logitsSalida).dataSync();
-
-                    // 7. Búsqueda del índice ganador (np.argmax)
-                    let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
-                    let porcentajeCerteza = (probabilidades[indicePredicho] * 100).toFixed(2);
-
-                    // 8. Construcción del vector de control en pantalla
-                    let mapaVector = nombresClases.map((nombre, idx) => {
-                        return `[${idx}] ${nombre}: ${(probabilidades[idx] * 100).toFixed(2)}%`;
-                    }).join('\n');
-
-                    document.getElementById('resultado').innerText = 
-                        `PREDICCIÓN: ${nombresClases[indicePredicho].toUpperCase()} (${porcentajeCerteza}%)\n\n` +
-                        `--- MAPA DE PROBABILIDADES ---\n${mapaVector}`;
-                });
-            }
         }
-        lector.readAsDataURL(archivo);
+        lectorVista.readAsDataURL(archivo);
+
+        // Lector 2 (AUDITORÍA MATEMÁTICA): Leemos el archivo como bytes puros del disco
+        const lectorBinario = new FileReader();
+        lectorBinario.onload = async function(event) {
+            document.getElementById('resultado').innerText = "Analizando matriz binaria cruda...";
+
+            tf.tidy(() => {
+                // Transformamos el buffer de bytes en una matriz de enteros Uint8
+                const arr = new Uint8Array(event.target.result);
+                
+                // 1. DECODIFICACIÓN NATIVA: TensorFlow decodifica el JPG/PNG bit a bit (igual que Python)
+                let tensorOriginal = tf.image.decodeImage(arr, 3);
+
+                // 2. Redimensión exacta por Vecino Más Cercano (Nearest Neighbor)
+                let tensorRedimensionado = tf.image.resizeNearestNeighbor(tensorOriginal, [32, 32], true);
+
+                // 3. Normalización estándar (0.0 a 1.0)
+                let tensorNormalizado = tensorRedimensionado.toFloat().div(tf.scalar(255.0));
+
+                // 4. Estructuración de dimensiones para el Batch -> [1, 32, 32, 3]
+                let imgInput = tensorNormalizado.expandDims(0);
+                
+                // 5. Inferencia sobre el grafo
+                let logitsSalida = modeloJS.predict(imgInput);
+                
+                // 6. Softmax definitivo
+                let probabilidades = tf.softmax(logitsSalida).dataSync();
+
+                // 7. Argmax
+                let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
+                let porcentajeCerteza = (probabilidades[indicePredicho] * 100).toFixed(2);
+
+                // 8. Renderizado del vector completo
+                let mapaVector = nombresClases.map((nombre, idx) => {
+                    return `[${idx}] ${nombre}: ${(probabilidades[idx] * 100).toFixed(2)}%`;
+                }).join('\n');
+
+                document.getElementById('resultado').innerText = 
+                    `PREDICCIÓN: ${nombresClases[indicePredicho].toUpperCase()} (${porcentajeCerteza}%)\n\n` +
+                    `--- MAPA DE PROBABILIDADES ---\n${mapaVector}`;
+            });
+        };
+        
+        // Disparamos la lectura binaria directa del archivo local
+        lectorBinario.readAsArrayBuffer(archivo);
     });
 
     iniciarModelo();
