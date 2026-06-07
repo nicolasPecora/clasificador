@@ -7,10 +7,10 @@
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
         .contenedor { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        #vista-previa { max-width: 200px; margin-top: 15px; display: none; border-radius: 4px; }
+        /* Muestra la foto original con un tamaño amigable en pantalla */
+        #vista-previa { max-width: 300px; max-height: 300px; margin-top: 15px; display: none; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; white-space: pre-line; }
-        button { background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
-        button:disabled { background-color: #ccc; }
+        input[type="file"] { margin: 20px 0; }
     </style>
 </head>
 <body>
@@ -20,7 +20,7 @@
     <p id="estado">Cargando modelo de Inteligencia Artificial...</p>
     
     <input type="file" id="cargador-foto" accept="image/*" disabled><br>
-    <img id="vista-previa" src="#" alt="Tu foto">
+    <img id="vista-previa" src="#" alt="Tu foto original">
     <div id="resultado"></div>
 </div>
 
@@ -60,35 +60,37 @@
         lector.onload = function(event) {
             const imgElement = document.getElementById('vista-previa');
             imgElement.src = event.target.result;
-            imgElement.style.display = "inline-block";
+            imgElement.style.display = "inline-block"; // Muestra la foto original en la web
 
             imgElement.onload = async function() {
                 document.getElementById('resultado').innerText = "Analizando...";
 
-                // Encapsulamos en tf.tidy para limpiar automáticamente tensores temporales
                 tf.tidy(() => {
-                    // 1. Forzamos 3 canales (RGB) eliminando el canal Alfa (transparencia)
-                    let tensor = tf.browser.fromPixels(imgElement, 3) 
-                        // 2. Redimensionado bilineal para suavizar bordes y evitar distorsión
-                        .resizeBilinear([32, 32]) 
-                        .toFloat()
-                        // 3. Normalización idéntica a Python (escalado 0-1)
-                        .div(tf.scalar(255.0));
+                    // 1. Capturamos los píxeles de la imagen original (mantiene su escala en pantalla)
+                    let tensorOriginal = tf.browser.fromPixels(imgElement, 3);
 
-                    // 4. Agregamos dimensión de lote -> [1, 32, 32, 3]
-                    let input = tensor.expandDims(0);
+                    // 2. RESIZE INTERNO: Redimensionado Bicúbico a (32, 32) en memoria, igual que PIL en Python
+                    let tensorRedimensionado = tf.image.resizeBicubic(tensorOriginal, [32, 32]);
+
+                    // 3. Convertimos a Float y Normalizamos (array / 255.0)
+                    let tensorNormalizado = tensorRedimensionado.toFloat().div(tf.scalar(255.0));
+
+                    // 4. Expandimos dimensiones para simular el Batch -> [1, 32, 32, 3]
+                    let imgInput = tensorNormalizado.expandDims(0);
                     
-                    // 5. Predicción y cálculo de probabilidades reales con Softmax
-                    let logits = modeloJS.predict(input);
-                    let probabilidades = tf.softmax(logits).dataSync();
+                    // 5. Predicción (Logits crudos)
+                    let logitsSalida = modeloJS.predict(imgInput);
+                    
+                    // 6. Transformamos Logits a probabilidades con Softmax
+                    let probabilidades = tf.softmax(logitsSalida).dataSync();
 
-                    // 6. Buscamos el índice con mayor confianza
+                    // 7. Buscamos el índice mayor (np.argmax)
                     let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
-                    let certeza = (probabilidades[indicePredicho] * 100).toFixed(2);
+                    let porcentajeCerteza = (probabilidades[indicePredicho] * 100).toFixed(2);
 
-                    // 7. Mostramos el resultado en pantalla
+                    // Mostramos el veredicto abajo de la foto original
                     document.getElementById('resultado').innerText = 
-                        `Predicción: ${nombresClases[indicePredicho].toUpperCase()}\nConfianza: ${certeza}%`;
+                        `PREDICCIÓN: ${nombresClases[indicePredicho].toUpperCase()}\nCONFIANZA: ${porcentajeCerteza}%`;
                 });
             }
         }
