@@ -2,84 +2,83 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Clasificador CIFAR-10 Final</title>
+    <title>CIFAR-10 Final</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; padding-top: 50px; }
         .contenedor { max-width: 450px; margin: auto; padding: 20px; background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        .badge-version { padding: 5px 15px; background: #c2410c; color: white; border-radius: 20px; font-weight: bold; margin-bottom: 15px; display: inline-block; }
-        #resultado { margin-top: 20px; font-size: 1.1rem; font-weight: bold; white-space: pre-line; color: #1e293b; }
+        .badge { background: #059669; color: white; padding: 5px 15px; border-radius: 20px; margin-bottom: 10px; display: inline-block; }
     </style>
 </head>
 <body>
 
 <div class="contenedor">
-    <div class="badge-version">VERSIÓN: 1.0.7-FIXED</div>
+    <div class="badge">VERSIÓN: 1.0.9-CLEAN</div>
     <h2>CIFAR-10 IA</h2>
     <input type="file" id="subir" accept="image/*">
-    <div id="resultado">Cargando modelo...</div>
+    <div id="resultado">Esperando...</div>
 </div>
 
 <script>
-    let modelo = null;
+    let modelo;
     const clases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
-    // Parche de clase para evitar error de InputLayer
-    tf.serialization.registerClass(
-        class PatchedInputLayer extends tf.layers.Layer {
-            static get className() { return 'InputLayer'; }
-            constructor(config) {
-                super(config || {});
-                this.batchInputShape = config.batch_shape || config.batchInputShape || [null, 32, 32, 3];
-            }
-        }
-    );
-
-    async function iniciar() {
+    // Carga síncrona/asíncrona básica
+    async function load() {
         try {
             modelo = await tf.loadLayersModel('./model.json');
-            document.getElementById('resultado').innerText = "Modelo cargado con éxito. Subí una imagen.";
-        } catch (e) {
-            console.error(e);
-            document.getElementById('resultado').innerText = "Error cargando modelo: " + e.message;
+            document.getElementById('resultado').innerText = "Modelo listo. Subí tu imagen.";
+        } catch (err) {
+            document.getElementById('resultado').innerText = "Error: " + err.message;
         }
     }
-    iniciar();
+    load();
 
-    document.getElementById('subir').addEventListener('change', async (e) => {
-        if (!modelo) return;
-        
+    document.getElementById('subir').onchange = async (e) => {
+        if (!modelo) {
+            alert("El modelo aún está cargando...");
+            return;
+        }
+
         const file = e.target.files[0];
-        const bitmap = await createImageBitmap(file);
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
         
-        tf.tidy(() => {
-            const canvas = new OffscreenCanvas(32, 32);
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(bitmap, 0, 0, 32, 32);
-            
-            let tensor = tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0);
-            let prediccion = modelo.predict(tensor).dataSync();
-            let ajustados = Array.from(prediccion);
+        img.onload = async () => {
+            const tensor = tf.tidy(() => {
+                // Canvas limpio sin Offscreen para máxima compatibilidad
+                const canvas = document.createElement('canvas');
+                canvas.width = 32; canvas.height = 32;
+                canvas.getContext('2d').drawImage(img, 0, 0, 32, 32);
+                return tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0);
+            });
 
-            // Lógica de compensación para el sesgo de la Rana (indice 6)
-            if (ajustados[6] > 0.40) {
-                let copias = [...ajustados];
+            const pred = modelo.predict(tensor);
+            const data = await pred.data();
+            
+            // Lógica de desesgo (Filtro Rana)
+            let array = Array.from(data);
+            if (array[6] > 0.40) {
+                let copias = [...array];
                 copias[6] = 0;
-                let segundoMejor = copias.indexOf(Math.max(...copias));
-                
-                if (ajustados[segundoMejor] > 0.10) {
-                    ajustados[6] *= 0.4;
-                    ajustados[segundoMejor] *= 1.6;
+                let segundo = copias.indexOf(Math.max(...copias));
+                if (array[segundo] > 0.10) {
+                    array[6] *= 0.4;
+                    array[segundo] *= 1.6;
                 }
             }
 
-            let total = ajustados.reduce((a,b) => a + b);
-            let finales = ajustados.map(p => p / total);
-            let indice = finales.indexOf(Math.max(...finales));
+            const total = array.reduce((a,b) => a+b);
+            const fin = array.map(p => p/total);
+            const idx = fin.indexOf(Math.max(...fin));
 
             document.getElementById('resultado').innerText = 
-                `PREDICCIÓN: ${clases[indice].toUpperCase()}\n` +
-                `Certeza: ${(finales[indice]*100).toFixed(2)}%\n\n` +
-                `Top 3:\n` +
-                `1. ${clases[indice]} (${(finales[indice]*100).toFixed(2)}%)\n` +
-                `2. ${clases[findSecond(finales, indice)]} (${(finales[findSecond(finales, indice)]
+                `PREDICCIÓN: ${clases[idx]}\nCerteza: ${(fin[idx]*100).toFixed(2)}%`;
+            
+            tensor.dispose();
+            pred.dispose();
+        };
+    };
+</script>
+</body>
+</html>
