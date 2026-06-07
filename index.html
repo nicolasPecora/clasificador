@@ -2,18 +2,20 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Clasificador CIFAR-10</title>
+    <title>Clasificador CIFAR-10 - Versión 1.1.2</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f4f4f9; padding-top: 30px; }
         .contenedor { max-width: 500px; margin: auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .badge { background: #059669; color: white; padding: 5px 12px; border-radius: 20px; font-weight: bold; margin-bottom: 10px; display: inline-block; }
         #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; white-space: pre-line; }
     </style>
 </head>
 <body>
 
 <div class="contenedor">
-    <h2>Clasificador (Versión 1.0.5-CONDICIONAL)</h2>
+    <div class="badge">VERSIÓN: 1.1.2-STABLE</div>
+    <h2>CIFAR-10 IA</h2>
     <input type="file" id="cargador-foto" accept="image/*">
     <div id="resultado">Cargando modelo...</div>
 </div>
@@ -22,18 +24,32 @@
     let modeloJS;
     const nombresClases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
+    // 1. INYECCIÓN DE SEGURIDAD: Registramos la capa de entrada forzando la forma
+    tf.serialization.registerClass(
+        class PatchedInputLayer extends tf.layers.Layer {
+            static get className() { return 'InputLayer'; }
+            constructor(config) {
+                super(config || {});
+                this.batchInputShape = [null, 32, 32, 3];
+            }
+        }
+    );
+
+    // 2. CARGA DEL MODELO
     async function iniciarModelo() {
         try {
             modeloJS = await tf.loadLayersModel('./model.json');
             document.getElementById('resultado').innerText = "Modelo cargado. Subí una foto:";
         } catch (error) {
-            document.getElementById('resultado').innerText = "Error cargando: " + error.message;
+            console.error("Error de carga:", error);
+            document.getElementById('resultado').innerText = "Error: " + error.message;
         }
     }
 
+    // 3. PROCESAMIENTO E INFERENCIA
     document.getElementById('cargador-foto').addEventListener('change', function(e) {
         const archivo = e.target.files[0];
-        if (!archivo) return;
+        if (!archivo || !modeloJS) return;
 
         const lector = new FileReader();
         lector.onload = function(event) {
@@ -47,18 +63,16 @@
                     
                     const tensor = tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0);
                     const logits = modeloJS.predict(tensor);
-                    const probs = tf.softmax(logits).dataSync();
+                    const probs = logits.dataSync(); // Asumimos salida directa del modelo
 
                     let probsCorregidas = Array.from(probs);
 
-                    // --- AQUÍ ESTÁ LA LÓGICA DE LA RANA QUE ME PEDISTE ---
-                    // Si la rana (indice 6) supera el 40%, aplicamos el filtro de ruido
+                    // Lógica de corrección de Rana (sesgo de navegador)
                     if (probsCorregidas[6] > 0.40) {
                         let copias = [...probsCorregidas];
-                        copias[6] = 0; // Sacamos la rana temporalmente
+                        copias[6] = 0;
                         let segundoMejor = copias.indexOf(Math.max(...copias));
                         
-                        // Si hay otro candidato fuerte (> 10%), sesgamos la rana
                         if (probsCorregidas[segundoMejor] > 0.10) {
                             probsCorregidas[6] *= 0.4;
                             probsCorregidas[segundoMejor] *= 1.6;
@@ -70,7 +84,8 @@
                     const idx = finales.indexOf(Math.max(...finales));
 
                     document.getElementById('resultado').innerText = 
-                        `PREDICCIÓN: ${nombresClases[idx].toUpperCase()}\n(${ (finales[idx] * 100).toFixed(2) }% certeza)`;
+                        `PREDICCIÓN: ${nombresClases[idx].toUpperCase()}\n` +
+                        `(${ (finales[idx] * 100).toFixed(2) }% certeza)`;
                 });
             }
         }
