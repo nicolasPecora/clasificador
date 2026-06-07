@@ -27,21 +27,20 @@
     let modeloJS;
     const nombresClases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
-async function iniciarModelo() {
+    async function iniciarModelo() {
         try {
-            // REGISTRO DE COMPATIBILIDAD: Le enseñamos a TF.js a manejar la entrada implícita de Keras v3
+            // 1. REGISTRO DE COMPATIBILIDAD: Parche estricto para las entradas implícitas de Keras v3
             tf.serialization.registerClass(
                 class PatchedInputLayer extends tf.layers.Layer {
                     static get className() { return 'InputLayer'; }
                     constructor(config) {
                         super(config || {});
-                        // Forzamos el formato CIFAR-10 estándar de 32x32 píxeles con 3 canales RGB
                         this.batchInputShape = config.batch_shape || config.batchInputShape || [null, 32, 32, 3];
                     }
                 }
             );
 
-            // Ahora sí cargamos el modelo nativo directamente
+            // 2. Carga del modelo web nativo
             modeloJS = await tf.loadLayersModel('./model.json');
             
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
@@ -66,44 +65,46 @@ async function iniciarModelo() {
                 document.getElementById('resultado').innerText = "Analizando...";
 
                 tf.tidy(() => {
-                    // 1. CREAMOS UN CANVAS INTERNO: Extrae los píxeles puros del archivo original
+                    // 1. Canvas interno aislado para extraer píxeles puros sin distorsiones del navegador
                     const canvas = document.createElement('canvas');
                     canvas.width = imgElement.naturalWidth;
                     canvas.height = imgElement.naturalHeight;
                     const ctx = canvas.getContext('2d');
-                    
-                    // Desactivamos suavizados del navegador para no alterar la matriz de entrada
                     ctx.imageSmoothingEnabled = false;
                     ctx.drawImage(imgElement, 0, 0);
 
-                    // 2. Capturamos los píxeles en formato RGB nativo
+                    // 2. Conversión a tensor crudo
                     let tensorOriginal = tf.browser.fromPixels(canvas, 3);
 
-                    // 3. Redimensionado bilinear limpio a 32x32 (igual que el procesador de Colab)
+                    // 3. Redimensión bilinear exacta a 32x32 píxeles
                     let tensorRedimensionado = tf.image.resizeBilinear(tensorOriginal, [32, 32], true);
 
-                    // 4. Normalización estricta de la escala de color (0.0 a 1.0)
+                    // 4. Normalización matemática estándar (0.0 a 1.0)
                     let tensorNormalizado = tensorRedimensionado.toFloat().div(tf.scalar(255.0));
 
-                    // 5. Expandimos dimensiones para simular el Batch -> [1, 32, 32, 3]
-                    let imgInput = tensorNormalizado.expandDims(0);
+                    // 5. CORRECCIÓN DE CANALES: Invertimos los ejes de color de RGB a BGR para desempatar el sesgo
+                    let canales = tf.split(tensorNormalizado, 3, 2); 
+                    let tensorEspejado = tf.concat([canales[2], canales[1], canales[0]], 2);
+
+                    // 6. Expandimos dimensiones para estructurar el Batch -> [1, 32, 32, 3]
+                    let imgInput = tensorEspejado.expandDims(0);
                     
-                    // 6. Ejecutamos la predicción matemática real
+                    // 7. Ejecución de la inferencia sobre la red convolucional
                     let logitsSalida = modeloJS.predict(imgInput);
                     
-                    // 7. Aplicamos Softmax exacto sobre la salida
+                    // 8. Softmax estricto para mapear el espacio de probabilidades
                     let probabilidades = tf.softmax(logitsSalida).dataSync();
 
-                    // 8. Buscamos el índice ganador (np.argmax)
+                    // 9. Búsqueda del índice con máxima certeza (np.argmax)
                     let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
                     let porcentajeCerteza = (probabilidades[indicePredicho] * 100).toFixed(2);
 
-                    // 9. Armamos el mapa de probabilidades completo para control de métricas en pantalla
+                    // 10. Construcción del vector completo ordenado para control en pantalla
                     let mapaVector = nombresClases.map((nombre, idx) => {
                         return `[${idx}] ${nombre}: ${(probabilidades[idx] * 100).toFixed(2)}%`;
                     }).join('\n');
 
-                    // Renderizado final abajo de tu imagen original
+                    // Despliegue de resultados en la interfaz
                     document.getElementById('resultado').innerText = 
                         `PREDICCIÓN: ${nombresClases[indicePredicho].toUpperCase()} (${porcentajeCerteza}%)\n\n` +
                         `--- MAPA DE PROBABILIDADES ---\n${mapaVector}`;
