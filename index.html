@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Clasificador CIFAR-10 Completo</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
         .contenedor { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
@@ -30,11 +30,8 @@
 
     async function iniciarModelo() {
         try {
-            // Usamos una ruta absoluta relativa para evitar que GitHub Pages se pierda en los directorios
-            const urlModelo = window.location.href.substring(0, window.location.href.lastIndexOf('/')) + '/model.json';
-            
-            console.log("Intentando cargar desde:", urlModelo);
-            modeloJS = await tf.loadLayersModel(urlModelo);
+            // Carga directa del archivo JSON limpio y corregido
+            modeloJS = await tf.loadLayersModel('./model.json');
             
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
             document.getElementById('cargador-foto').disabled = false;
@@ -76,10 +73,7 @@
         lector.readAsDataURL(archivo);
     });
 
-    // Pequeño delay para asegurar que el DOM de GitHub Pages esté listo antes de pedir los archivos
-    window.addEventListener('DOMContentLoaded', () => {
-        setTimeout(iniciarModelo, 500);
-    });
+    iniciarModelo();
 </script>
 
 </body>
