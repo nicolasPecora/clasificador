@@ -2,64 +2,72 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Clasificador CIFAR-10 Final</title>
+    <title>Clasificador CIFAR-10 Estable</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; padding-top: 50px; }
         .contenedor { max-width: 450px; margin: auto; padding: 20px; background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        #resultado { margin-top: 20px; font-size: 1.2rem; font-weight: bold; color: #1e293b; white-space: pre-line; }
+        .badge-version { padding: 5px 15px; background: #0f172a; color: white; border-radius: 20px; font-weight: bold; margin-bottom: 10px; display: inline-block; }
+        #resultado { margin-top: 20px; font-size: 1.1rem; font-weight: bold; white-space: pre-line; }
     </style>
 </head>
 <body>
 
 <div class="contenedor">
-    <h2>Analizador CIFAR-10</h2>
+    <div class="badge-version">VERSIÓN: 1.0.6-STABLE</div>
+    <h2>CIFAR-10 IA</h2>
     <input type="file" id="subir" accept="image/*">
-    <div id="resultado">Esperando imagen...</div>
+    <div id="resultado">Cargando modelo...</div>
 </div>
 
 <script>
-    let modelo;
+    let modelo = null;
     const clases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
-    // Carga inicial
-    tf.loadLayersModel('./model.json').then(m => { modelo = m; });
+    // 1. Carga segura del modelo con manejo de errores
+    async function iniciar() {
+        try {
+            modelo = await tf.loadLayersModel('./model.json');
+            document.getElementById('resultado').innerText = "Modelo cargado. Subí una imagen.";
+        } catch (e) {
+            document.getElementById('resultado').innerText = "Error cargando modelo: " + e.message;
+        }
+    }
+    iniciar();
 
     document.getElementById('subir').addEventListener('change', async (e) => {
+        if (!modelo) return; // Protección contra predicción sin modelo
+        
         const file = e.target.files[0];
         const bitmap = await createImageBitmap(file);
         
         tf.tidy(() => {
-            // Procesamiento rígido 32x32
             const canvas = new OffscreenCanvas(32, 32);
             const ctx = canvas.getContext('2d');
             ctx.drawImage(bitmap, 0, 0, 32, 32);
             
             let tensor = tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0);
-            let prediccion = modelo.predict(tensor).dataSync();
-
-            // --- TRUCO: MATRIZ DE COMPENSACIÓN DE SESGO ---
-            // Aplicamos un castigo a la clase 'Rana' (indice 6) si hay candidatos fuertes cerca
-            let ajustados = Array.from(prediccion);
             
-            // Si la Rana está inflada artificialmente (> 50%), buscamos el segundo mejor candidato
-            if (ajustados[6] > 0.50) {
+            // 2. Predicción segura
+            let prediccion = modelo.predict(tensor).dataSync();
+            let ajustados = Array.from(prediccion);
+
+            // 3. Lógica de desesgo (Filtro para la Rana [6])
+            if (ajustados[6] > 0.40) {
                 let copias = [...ajustados];
-                copias[6] = 0; // Eliminamos la rana momentáneamente para ver quién es el segundo
+                copias[6] = 0;
                 let segundoMejor = copias.indexOf(Math.max(...copias));
                 
-                // Si el segundo tiene al menos un 5% de probabilidad real, lo promovemos
-                if (ajustados[segundoMejor] > 0.05) {
-                    ajustados[6] *= 0.5; // Reducimos el peso de la rana a la mitad
-                    ajustados[segundoMejor] *= 1.5; // Potenciamos al candidato real
+                if (ajustados[segundoMejor] > 0.10) {
+                    ajustados[6] *= 0.4;
+                    ajustados[segundoMejor] *= 1.6;
                 }
             }
 
-            // Normalizar de nuevo para que sume 1
             let total = ajustados.reduce((a,b) => a + b);
             let finales = ajustados.map(p => p / total);
-
             let indice = finales.indexOf(Math.max(...finales));
+
             document.getElementById('resultado').innerText = 
                 `PREDICCIÓN: ${clases[indice].toUpperCase()}\n` +
                 `Certeza: ${(finales[indice]*100).toFixed(2)}%\n\n` +
