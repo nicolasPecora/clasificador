@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Clasificador CIFAR-10 Completo</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
         .contenedor { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
@@ -30,26 +30,17 @@
 
     async function iniciarModelo() {
         try {
-            // El truco para corregir el bug de compatibilidad de la InputLayer entre Python y JS:
-            // Forzamos a TensorFlow.js a registrar la estructura que exige la consola
-            tf.serialization.registerClass(
-                class patchedInputLayer extends tf.layers.Layer {
-                    static get className() { return 'InputLayer'; }
-                    constructor(config) {
-                        super(config);
-                        this.batchInputShape = config.batchInputShape || [null, 32, 32, 3];
-                    }
-                }
-            );
-
-            // Cargamos el json usando rutas relativas explícitas del servidor de GitHub
-            modeloJS = await tf.loadLayersModel('./model.json');
+            // Usamos una ruta absoluta relativa para evitar que GitHub Pages se pierda en los directorios
+            const urlModelo = window.location.href.substring(0, window.location.href.lastIndexOf('/')) + '/model.json';
+            
+            console.log("Intentando cargar desde:", urlModelo);
+            modeloJS = await tf.loadLayersModel(urlModelo);
             
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
             document.getElementById('cargador-foto').disabled = false;
         } catch (error) {
-            document.getElementById('estado').innerText = "Error al cargar el modelo.";
-            console.error(error);
+            document.getElementById('estado').innerText = "Error crítico al cargar los archivos del modelo.";
+            console.error("Detalle del error:", error);
         }
     }
 
@@ -66,13 +57,12 @@
             imgElement.onload = async function() {
                 document.getElementById('resultado').innerText = "Analizando...";
 
-                // Procesamiento idéntico al flujo en Python
                 let tensor = tf.browser.fromPixels(imgElement)
-                    .resizeNearestNeighbor([32, 32]) // Tamaño de CIFAR-10
+                    .resizeNearestNeighbor([32, 32])
                     .toFloat()
-                    .div(tf.scalar(255.0)); // Normalización
+                    .div(tf.scalar(255.0));
 
-                let input = tensor.expandDims(0); // Simula el Batch
+                let input = tensor.expandDims(0);
                 let logits = modeloJS.predict(input);
                 let probabilidades = tf.softmax(logits).dataSync();
 
@@ -86,7 +76,10 @@
         lector.readAsDataURL(archivo);
     });
 
-    iniciarModelo();
+    // Pequeño delay para asegurar que el DOM de GitHub Pages esté listo antes de pedir los archivos
+    window.addEventListener('DOMContentLoaded', () => {
+        setTimeout(iniciarModelo, 500);
+    });
 </script>
 
 </body>
