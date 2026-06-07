@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Clasificador CIFAR-10 Completo</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
+        .contenedor { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        #vista-previa { max-width: 200px; margin-top: 15px; display: none; border-radius: 4px; }
+        #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; }
+        button { background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        button:disabled { background-color: #ccc; }
+    </style>
+</head>
+<body>
+
+<div class="contenedor">
+    <h2>Clasificador de Imágenes (CIFAR-10)</h2>
+    <p id="estado">Cargando modelo de Inteligencia Artificial...</p>
+    
+    <input type="file" id="cargador-foto" accept="image/*" disabled><br>
+    <img id="vista-previa" src="#" alt="Tu foto">
+    <div id="resultado"></div>
+</div>
+
+<script>
+    let modeloJS;
+    // Lista idéntica de etiquetas de tu notebook
+    const nombresClases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
+
+    // Función para inicializar y cargar el modelo en el navegador
+    async function iniciarModelo() {
+        try {
+            // Carga el json del modelo (asume que está en la misma carpeta)
+            modeloJS = await tf.loadLayersModel('model.json');
+            document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
+            document.getElementById('cargador-foto').disabled = false;
+        } catch (error) {
+            document.getElementById('estado').innerText = "Error al cargar el modelo.";
+            console.error(error);
+        }
+    }
+
+    // Procesamiento de la imagen cargada por el usuario
+    document.getElementById('cargador-foto').addEventListener('change', function(e) {
+        const archivo = e.target.files[0];
+        if (!archivo) return;
+
+        const lector = new FileReader();
+        lector.onload = function(event) {
+            const imgElement = document.getElementById('vista-previa');
+            imgElement.src = event.target.result;
+            imgElement.style.display = "inline-block";
+
+            imgElement.onload = async function() {
+                document.getElementById('resultado').innerText = "Analizando...";
+
+                // EQUIVALENTE AL PROCESAMIENTO EN PYTHON:
+                // 1. Captura la imagen del HTML y la convierte en un tensor numérico
+                let tensor = tf.browser.fromPixels(imgElement)
+                    .resizeNearestNeighbor([32, 32]) // Redimensión estricta a 32x32
+                    .toFloat()
+                    .div(tf.scalar(255.0)); // Normalización (0.0 a 1.0)
+
+                // 2. Expande dimensiones para simular el Batch (1, 32, 32, 3)
+                let input = tensor.expandDims(0);
+
+                // 3. Ejecuta la predicción (Logits)
+                let logits = modeloJS.predict(input);
+
+                // 4. Aplica Softmax para obtener probabilidades reales
+                let probabilidades = tf.softmax(logits).dataSync();
+
+                // 5. Encuentra el índice con mayor valor
+                let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
+                let certeza = (probabilidades[indicePredicho] * 100).toFixed(2);
+
+                // 6. Muestra el veredicto en pantalla
+                document.getElementById('resultado').innerText = 
+                    `Predicción: ${nombresClases[indicePredicho].toUpperCase()}\nConfianza: ${certeza}%`;
+            }
+        }
+        lector.readAsDataURL(archivo);
+    });
+
+    // Arranca el flujo al abrir la web
+    iniciarModelo();
+</script>
+
+</body>
+</html>
