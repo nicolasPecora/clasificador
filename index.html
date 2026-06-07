@@ -2,19 +2,19 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Clasificador CIFAR-10 - Versión 1.1.2</title>
+    <title>Clasificador CIFAR-10 - Versión 1.1.5</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f4f4f9; padding-top: 30px; }
         .contenedor { max-width: 500px; margin: auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        .badge { background: #059669; color: white; padding: 5px 12px; border-radius: 20px; font-weight: bold; margin-bottom: 10px; display: inline-block; }
+        .badge { background: #2563eb; color: white; padding: 5px 12px; border-radius: 20px; font-weight: bold; margin-bottom: 10px; display: inline-block; }
         #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; white-space: pre-line; }
     </style>
 </head>
 <body>
 
 <div class="contenedor">
-    <div class="badge">VERSIÓN: 1.1.2-STABLE</div>
+    <div class="badge">VERSIÓN: 1.1.5-STABLE</div>
     <h2>CIFAR-10 IA</h2>
     <input type="file" id="cargador-foto" accept="image/*">
     <div id="resultado">Cargando modelo...</div>
@@ -24,7 +24,7 @@
     let modeloJS;
     const nombresClases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
-    // 1. INYECCIÓN DE SEGURIDAD: Registramos la capa de entrada forzando la forma
+    // 1. INYECCIÓN DE SEGURIDAD (Capa de entrada)
     tf.serialization.registerClass(
         class PatchedInputLayer extends tf.layers.Layer {
             static get className() { return 'InputLayer'; }
@@ -41,12 +41,12 @@
             modeloJS = await tf.loadLayersModel('./model.json');
             document.getElementById('resultado').innerText = "Modelo cargado. Subí una foto:";
         } catch (error) {
-            console.error("Error de carga:", error);
-            document.getElementById('resultado').innerText = "Error: " + error.message;
+            document.getElementById('resultado').innerText = "Error cargando modelo: " + error.message;
         }
     }
+    iniciarModelo();
 
-    // 3. PROCESAMIENTO E INFERENCIA
+    // 3. PROCESAMIENTO
     document.getElementById('cargador-foto').addEventListener('change', function(e) {
         const archivo = e.target.files[0];
         if (!archivo || !modeloJS) return;
@@ -63,36 +63,38 @@
                     
                     const tensor = tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0);
                     const logits = modeloJS.predict(tensor);
-                    const probs = logits.dataSync(); // Asumimos salida directa del modelo
+                    const probs = logits.dataSync();
 
-                    let probsCorregidas = Array.from(probs);
+                    let array = Array.from(probs);
 
-                    // Lógica de corrección de Rana (sesgo de navegador)
-                    if (probsCorregidas[6] > 0.40) {
-                        let copias = [...probsCorregidas];
-                        copias[6] = 0;
-                        let segundoMejor = copias.indexOf(Math.max(...copias));
+                    // --- VENTANA DE TOLERANCIA Y NORMALIZACIÓN ---
+                    // Solo corregimos si la Rana (idx 6) no es tan dominante (ventana de duda)
+                    if (array[6] > 0.40 && array[6] < 0.85) {
+                        let originalRana = array[6];
+                        array[6] *= 0.3; // Bajamos el peso de la rana
                         
-                        if (probsCorregidas[segundoMejor] > 0.10) {
-                            probsCorregidas[6] *= 0.4;
-                            probsCorregidas[segundoMejor] *= 1.6;
-                        }
+                        let copias = [...array];
+                        copias[6] = 0;
+                        let idx2 = copias.indexOf(Math.max(...copias));
+                        
+                        // Redistribuimos la diferencia
+                        let diferencia = originalRana - array[6];
+                        array[idx2] += diferencia;
                     }
 
-                    const sumaTotal = probsCorregidas.reduce((a, b) => a + b, 0);
-                    const finales = probsCorregidas.map(p => p / sumaTotal);
-                    const idx = finales.indexOf(Math.max(...finales));
+                    // NORMALIZACIÓN ESTRICTA (para asegurar que la suma sea siempre 1)
+                    let suma = array.reduce((a, b) => a + b, 0);
+                    let finales = array.map(p => p / suma);
+                    let idx = finales.indexOf(Math.max(...finales));
 
                     document.getElementById('resultado').innerText = 
                         `PREDICCIÓN: ${nombresClases[idx].toUpperCase()}\n` +
-                        `(${ (finales[idx] * 100).toFixed(2) }% certeza)`;
+                        `Certeza: ${ (finales[idx] * 100).toFixed(2) }%`;
                 });
             }
         }
         lector.readAsDataURL(archivo);
     });
-
-    iniciarModelo();
 </script>
 </body>
 </html>
