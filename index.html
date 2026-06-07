@@ -27,9 +27,21 @@
     let modeloJS;
     const nombresClases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
-    async function iniciarModelo() {
+async function iniciarModelo() {
         try {
-            // Carga nativa directa y limpia de tu nuevo modelo entrenado
+            // REGISTRO DE COMPATIBILIDAD: Le enseñamos a TF.js a manejar la entrada implícita de Keras v3
+            tf.serialization.registerClass(
+                class PatchedInputLayer extends tf.layers.Layer {
+                    static get className() { return 'InputLayer'; }
+                    constructor(config) {
+                        super(config || {});
+                        // Forzamos el formato CIFAR-10 estándar de 32x32 píxeles con 3 canales RGB
+                        this.batchInputShape = config.batch_shape || config.batchInputShape || [null, 32, 32, 3];
+                    }
+                }
+            );
+
+            // Ahora sí cargamos el modelo nativo directamente
             modeloJS = await tf.loadLayersModel('./model.json');
             
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
