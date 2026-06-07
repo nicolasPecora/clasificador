@@ -5,8 +5,9 @@
     <title>Clasificador CIFAR-10 Profesional</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 30px; background-color: #f4f4f9; }
         .contenedor { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .badge-version { display: inline-block; padding: 4px 10px; background-color: #334155; color: #f8fafc; font-size: 0.8rem; font-weight: bold; border-radius: 12px; margin-bottom: 15px; }
         #vista-previa { max-width: 300px; max-height: 300px; margin-top: 15px; display: none; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; white-space: pre-line; }
         input[type="file"] { margin: 20px 0; }
@@ -15,6 +16,8 @@
 <body>
 
 <div class="contenedor">
+    <div class="badge-version">VERSIÓN: 1.0.0-AUDIT (Alineación Colab)</div>
+    
     <h2>Clasificador de Imágenes (CIFAR-10)</h2>
     <p id="estado">Cargando modelo de Inteligencia Artificial...</p>
     
@@ -29,7 +32,7 @@
 
     async function iniciarModelo() {
         try {
-            // 1. REGISTRO DE COMPATIBILIDAD: Parche estricto para las entradas implícitas de Keras v3
+            // Parche estricto para las entradas implícitas de Keras v3
             tf.serialization.registerClass(
                 class PatchedInputLayer extends tf.layers.Layer {
                     static get className() { return 'InputLayer'; }
@@ -40,11 +43,12 @@
                 }
             );
 
-            // 2. Carga del modelo web nativo
+            // Carga del modelo web nativo
             modeloJS = await tf.loadLayersModel('./model.json');
             
             document.getElementById('estado').innerText = "¡Modelo cargado! Subí una foto para testear:";
             document.getElementById('cargador-foto').disabled = false;
+            console.log("=== SISTEMA OPERATIVO WEB INICIALIZADO EN VERSIÓN 1.0.0 ===");
         } catch (error) {
             document.getElementById('estado').innerText = "Error crítico al inicializar la red neuronal.";
             console.error("Detalle del error:", error);
@@ -64,82 +68,44 @@
             imgElement.onload = async function() {
                 document.getElementById('resultado').innerText = "Analizando...";
 
-                try {
-                    tf.tidy(() => {
-                        // 1. Canvas interno aislado para extraer píxeles puros sin distorsiones del navegador
-                        const canvas = document.createElement('canvas');
-                        canvas.width = imgElement.naturalWidth;
-                        canvas.height = imgElement.naturalHeight;
-                        const ctx = canvas.getContext('2d');
-                        ctx.imageSmoothingEnabled = false;
-                        ctx.drawImage(imgElement, 0, 0);
+                tf.tidy(() => {
+                    // 1. Extraemos los píxeles directos del elemento HTML
+                    let tensorOriginal = tf.browser.fromPixels(imgElement, 3);
 
-                        // 2. Conversión a tensor crudo [Alto, Ancho, Canales]
-                        let tensorOriginal = tf.browser.fromPixels(canvas, 3);
+                    // 2. Redimensión exacta por Vecino Más Cercano (evita suavizados del navegador)
+                    let tensorRedimensionado = tf.image.resizeNearestNeighbor(tensorOriginal, [32, 32], true);
 
-                        // 3. Redimensión bilinear exacta a 32x32 píxeles
-                        let tensorRedimensionado = tf.image.resizeBilinear(tensorOriginal, [32, 32], true);
+                    // 3. Normalización idéntica a Python (0.0 a 1.0)
+                    let tensorNormalizado = tensorRedimensionado.toFloat().div(tf.scalar(255.0));
 
-                        // 4. Normalización matemática estándar (0.0 a 1.0)
-                        let tensorNormalizado = tensorRedimensionado.toFloat().div(tf.scalar(255.0));
+                    // ========================================================
+                    // TELEMETRÍA DE AUDITORÍA: Imprime los primeros píxeles en consola (F12)
+                    // ========================================================
+                    const pixelesMuestra = tensorNormalizado.slice([0, 0, 0], [1, 5, 3]).dataSync();
+                    console.log("AUDITORÍA V1.0.0 - Primeros 5 píxeles (R,G,B) normalizados:", pixelesMuestra);
 
-                        // 5. TRANSPOSICIÓN TRIDIMENSIONAL: Reordenamos los planos geométricos
-                        // Transponemos de [32, 32, 3] a [3, 32, 32] para emparejar el tensor
-                        let tensorTranspuesto = tensorNormalizado.transpose([2, 0, 1]); 
+                    // 4. Estructuración del lote (Batch) -> [1, 32, 32, 3]
+                    let imgInput = tensorNormalizado.expandDims(0);
+                    
+                    // 5. Inferencia matemática pura
+                    let logitsSalida = modeloJS.predict(imgInput);
+                    
+                    // 6. Mapeo probabilístico vía Softmax
+                    let probabilidades = tf.softmax(logitsSalida).dataSync();
 
-                        // 6. Expandimos dimensiones para estructurar el Batch
-                        let imgInput = tensorTranspuesto.expandDims(0);
-                        
-                        // 7. Ejecución de la inferencia sobre la red convolucional
-                        let logitsSalida = modeloJS.predict(imgInput);
-                        
-                        // 8. Softmax estricto para mapear el espacio de probabilidades
-                        let probabilidades = tf.softmax(logitsSalida).dataSync();
+                    // 7. Búsqueda del índice ganador (np.argmax)
+                    let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
+                    let porcentajeCerteza = (probabilidades[indicePredicho] * 100).toFixed(2);
 
-                        // 9. Búsqueda del índice con máxima certeza (np.argmax)
-                        let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
-                        let porcentajeCerteza = (probabilidades[indicePredicho] * 100).toFixed(2);
+                    // 8. Construcción del vector de control en pantalla
+                    let mapaVector = nombresClases.map((nombre, idx) => {
+                        return `[${idx}] ${nombre}: ${(probabilidades[idx] * 100).toFixed(2)}%`;
+                    }).join('\n');
 
-                        // 10. Construcción del vector completo ordenado para control en pantalla
-                        let mapaVector = nombresClases.map((nombre, idx) => {
-                            return `[${idx}] ${nombre}: ${(probabilidades[idx] * 100).toFixed(2)}%`;
-                        }).join('\n');
-
-                        // Despliegue de resultados en la interfaz
-                        document.getElementById('resultado').innerText = 
-                            `PREDICCIÓN: ${nombresClases[indicePredicho].toUpperCase()} (${porcentajeCerteza}%)\n\n` +
-                            `--- MAPA DE PROBABILIDADES ---\n${mapaVector}`;
-                    });
-                } catch (err) {
-                    console.warn("Fallo en formato channels_first, reintentando con formato directo standar...");
-                    // Si la red esperaba el formato por defecto [32, 32, 3], ejecutamos el plan B de respaldo automático
-                    tf.tidy(() => {
-                        const canvas = document.createElement('canvas');
-                        canvas.width = imgElement.naturalWidth;
-                        canvas.height = imgElement.naturalHeight;
-                        const ctx = canvas.getContext('2d');
-                        ctx.imageSmoothingEnabled = false;
-                        ctx.drawImage(imgElement, 0, 0);
-
-                        let tensorOriginal = tf.browser.fromPixels(canvas, 3);
-                        let tensorRedimensionado = tf.image.resizeBilinear(tensorOriginal, [32, 32], true);
-                        let tensorNormalizado = tensorRedimensionado.toFloat().div(tf.scalar(255.0));
-                        
-                        // Mantiene el orden estándar de dimensiones
-                        let imgInput = tensorNormalizado.expandDims(0);
-                        let logitsSalida = modeloJS.predict(imgInput);
-                        let probabilidades = tf.softmax(logitsSalida).dataSync();
-                        let indicePredicho = probabilidades.indexOf(Math.max(...probabilidades));
-                        let porcentajeCerteza = (probabilidades[indicePredicho] * 100).toFixed(2);
-                        let mapaVector = nombresClases.map((nombre, idx) => {
-                            return `[${idx}] ${nombre}: ${(probabilidades[idx] * 100).toFixed(2)}%`;
-                        }).join('\n');
-
-                        document.getElementById('resultado').innerText = 
-                            `PREDICCIÓN: ${nombresClases[indicePredicho].toUpperCase()} (${porcentajeCerteza}%)\n\n` +
-                            `--- MAPA DE PROBABILIDADES ---\n${mapaVector}`;
-                    });
-                }
+                    document.getElementById('resultado').innerText = 
+                        `PREDICCIÓN: ${nombresClases[indicePredicho].toUpperCase()} (${porcentajeCerteza}%)\n\n` +
+                        `--- MAPA DE PROBABILIDADES ---\n${mapaVector}`;
+                });
             }
         }
         lector.readAsDataURL(archivo);
