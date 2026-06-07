@@ -2,83 +2,82 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>CIFAR-10 Final</title>
+    <title>Clasificador CIFAR-10</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; padding-top: 50px; }
-        .contenedor { max-width: 450px; margin: auto; padding: 20px; background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        .badge { background: #059669; color: white; padding: 5px 15px; border-radius: 20px; margin-bottom: 10px; display: inline-block; }
+        body { font-family: sans-serif; text-align: center; background-color: #f4f4f9; padding-top: 30px; }
+        .contenedor { max-width: 500px; margin: auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        #resultado { margin-top: 20px; font-weight: bold; font-size: 1.2rem; color: #333; white-space: pre-line; }
     </style>
 </head>
 <body>
 
 <div class="contenedor">
-    <div class="badge">VERSIÓN: 1.0.9-CLEAN</div>
-    <h2>CIFAR-10 IA</h2>
-    <input type="file" id="subir" accept="image/*">
-    <div id="resultado">Esperando...</div>
+    <h2>Clasificador (Versión 1.0.5-CONDICIONAL)</h2>
+    <input type="file" id="cargador-foto" accept="image/*">
+    <div id="resultado">Cargando modelo...</div>
 </div>
 
 <script>
-    let modelo;
-    const clases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
+    let modeloJS;
+    const nombresClases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
-    // Carga síncrona/asíncrona básica
-    async function load() {
+    async function iniciarModelo() {
         try {
-            modelo = await tf.loadLayersModel('./model.json');
-            document.getElementById('resultado').innerText = "Modelo listo. Subí tu imagen.";
-        } catch (err) {
-            document.getElementById('resultado').innerText = "Error: " + err.message;
+            modeloJS = await tf.loadLayersModel('./model.json');
+            document.getElementById('resultado').innerText = "Modelo cargado. Subí una foto:";
+        } catch (error) {
+            document.getElementById('resultado').innerText = "Error cargando: " + error.message;
         }
     }
-    load();
 
-    document.getElementById('subir').onchange = async (e) => {
-        if (!modelo) {
-            alert("El modelo aún está cargando...");
-            return;
-        }
+    document.getElementById('cargador-foto').addEventListener('change', function(e) {
+        const archivo = e.target.files[0];
+        if (!archivo) return;
 
-        const file = e.target.files[0];
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        
-        img.onload = async () => {
-            const tensor = tf.tidy(() => {
-                // Canvas limpio sin Offscreen para máxima compatibilidad
-                const canvas = document.createElement('canvas');
-                canvas.width = 32; canvas.height = 32;
-                canvas.getContext('2d').drawImage(img, 0, 0, 32, 32);
-                return tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0);
-            });
+        const lector = new FileReader();
+        lector.onload = function(event) {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = async () => {
+                tf.tidy(() => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 32; canvas.height = 32;
+                    canvas.getContext('2d').drawImage(img, 0, 0, 32, 32);
+                    
+                    const tensor = tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0);
+                    const logits = modeloJS.predict(tensor);
+                    const probs = tf.softmax(logits).dataSync();
 
-            const pred = modelo.predict(tensor);
-            const data = await pred.data();
-            
-            // Lógica de desesgo (Filtro Rana)
-            let array = Array.from(data);
-            if (array[6] > 0.40) {
-                let copias = [...array];
-                copias[6] = 0;
-                let segundo = copias.indexOf(Math.max(...copias));
-                if (array[segundo] > 0.10) {
-                    array[6] *= 0.4;
-                    array[segundo] *= 1.6;
-                }
+                    let probsCorregidas = Array.from(probs);
+
+                    // --- AQUÍ ESTÁ LA LÓGICA DE LA RANA QUE ME PEDISTE ---
+                    // Si la rana (indice 6) supera el 40%, aplicamos el filtro de ruido
+                    if (probsCorregidas[6] > 0.40) {
+                        let copias = [...probsCorregidas];
+                        copias[6] = 0; // Sacamos la rana temporalmente
+                        let segundoMejor = copias.indexOf(Math.max(...copias));
+                        
+                        // Si hay otro candidato fuerte (> 10%), sesgamos la rana
+                        if (probsCorregidas[segundoMejor] > 0.10) {
+                            probsCorregidas[6] *= 0.4;
+                            probsCorregidas[segundoMejor] *= 1.6;
+                        }
+                    }
+
+                    const sumaTotal = probsCorregidas.reduce((a, b) => a + b, 0);
+                    const finales = probsCorregidas.map(p => p / sumaTotal);
+                    const idx = finales.indexOf(Math.max(...finales));
+
+                    document.getElementById('resultado').innerText = 
+                        `PREDICCIÓN: ${nombresClases[idx].toUpperCase()}\n(${ (finales[idx] * 100).toFixed(2) }% certeza)`;
+                });
             }
+        }
+        lector.readAsDataURL(archivo);
+    });
 
-            const total = array.reduce((a,b) => a+b);
-            const fin = array.map(p => p/total);
-            const idx = fin.indexOf(Math.max(...fin));
-
-            document.getElementById('resultado').innerText = 
-                `PREDICCIÓN: ${clases[idx]}\nCerteza: ${(fin[idx]*100).toFixed(2)}%`;
-            
-            tensor.dispose();
-            pred.dispose();
-        };
-    };
+    iniciarModelo();
 </script>
 </body>
 </html>
