@@ -2,19 +2,19 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Clasificador CIFAR-10 Estable</title>
+    <title>Clasificador CIFAR-10 Final</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; padding-top: 50px; }
         .contenedor { max-width: 450px; margin: auto; padding: 20px; background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        .badge-version { padding: 5px 15px; background: #0f172a; color: white; border-radius: 20px; font-weight: bold; margin-bottom: 10px; display: inline-block; }
-        #resultado { margin-top: 20px; font-size: 1.1rem; font-weight: bold; white-space: pre-line; }
+        .badge-version { padding: 5px 15px; background: #c2410c; color: white; border-radius: 20px; font-weight: bold; margin-bottom: 15px; display: inline-block; }
+        #resultado { margin-top: 20px; font-size: 1.1rem; font-weight: bold; white-space: pre-line; color: #1e293b; }
     </style>
 </head>
 <body>
 
 <div class="contenedor">
-    <div class="badge-version">VERSIÓN: 1.0.6-STABLE</div>
+    <div class="badge-version">VERSIÓN: 1.0.7-FIXED</div>
     <h2>CIFAR-10 IA</h2>
     <input type="file" id="subir" accept="image/*">
     <div id="resultado">Cargando modelo...</div>
@@ -24,19 +24,30 @@
     let modelo = null;
     const clases = ['Avión', 'Automóvil', 'Pájaro', 'Gato', 'Ciervo', 'Perro', 'Rana', 'Caballo', 'Barco', 'Camión'];
 
-    // 1. Carga segura del modelo con manejo de errores
+    // Parche de clase para evitar error de InputLayer
+    tf.serialization.registerClass(
+        class PatchedInputLayer extends tf.layers.Layer {
+            static get className() { return 'InputLayer'; }
+            constructor(config) {
+                super(config || {});
+                this.batchInputShape = config.batch_shape || config.batchInputShape || [null, 32, 32, 3];
+            }
+        }
+    );
+
     async function iniciar() {
         try {
             modelo = await tf.loadLayersModel('./model.json');
-            document.getElementById('resultado').innerText = "Modelo cargado. Subí una imagen.";
+            document.getElementById('resultado').innerText = "Modelo cargado con éxito. Subí una imagen.";
         } catch (e) {
+            console.error(e);
             document.getElementById('resultado').innerText = "Error cargando modelo: " + e.message;
         }
     }
     iniciar();
 
     document.getElementById('subir').addEventListener('change', async (e) => {
-        if (!modelo) return; // Protección contra predicción sin modelo
+        if (!modelo) return;
         
         const file = e.target.files[0];
         const bitmap = await createImageBitmap(file);
@@ -47,12 +58,10 @@
             ctx.drawImage(bitmap, 0, 0, 32, 32);
             
             let tensor = tf.browser.fromPixels(canvas).toFloat().div(255).expandDims(0);
-            
-            // 2. Predicción segura
             let prediccion = modelo.predict(tensor).dataSync();
             let ajustados = Array.from(prediccion);
 
-            // 3. Lógica de desesgo (Filtro para la Rana [6])
+            // Lógica de compensación para el sesgo de la Rana (indice 6)
             if (ajustados[6] > 0.40) {
                 let copias = [...ajustados];
                 copias[6] = 0;
@@ -73,15 +82,4 @@
                 `Certeza: ${(finales[indice]*100).toFixed(2)}%\n\n` +
                 `Top 3:\n` +
                 `1. ${clases[indice]} (${(finales[indice]*100).toFixed(2)}%)\n` +
-                `2. ${clases[findSecond(finales, indice)]} (${(finales[findSecond(finales, indice)]*100).toFixed(2)}%)`;
-        });
-    });
-
-    function findSecond(arr, skip) {
-        let copia = [...arr];
-        copia[skip] = 0;
-        return copia.indexOf(Math.max(...copia));
-    }
-</script>
-</body>
-</html>
+                `2. ${clases[findSecond(finales, indice)]} (${(finales[findSecond(finales, indice)]
